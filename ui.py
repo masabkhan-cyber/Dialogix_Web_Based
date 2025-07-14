@@ -377,6 +377,16 @@ def stream_response(response):
 
 def show_chat_page(state):
     """Renders the main chat interface, including messages and input controls."""
+
+    # --- Initialize session state ---
+    if "response_handled" not in st.session_state:
+        st.session_state.response_handled = False
+    if "audio_played" not in st.session_state:
+        st.session_state.audio_played = False
+    if "generated_response" not in st.session_state:
+        st.session_state.generated_response = None
+
+    # --- Ensure valid chat index ---
     if state.current_chat >= len(state.chat_engines):
         if len(state.chat_engines) > 0:
             state.current_chat = 0
@@ -388,55 +398,68 @@ def show_chat_page(state):
     chat_index = state.current_chat
     chat_engine = state.chat_engines[chat_index]
 
+    # --- Show welcome message if needed ---
     if not state.chat_sessions[chat_index]:
         welcome_message()
 
+    # --- Show chat history ---
     for msg in state.chat_sessions[chat_index]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # --- User text input ---
     user_text_input = st.chat_input("Type your message here...", key="chat_text_input")
     if user_text_input:
         state.chat_sessions[chat_index].append({"role": "user", "content": user_text_input})
+        st.session_state.response_handled = False
+        st.session_state.generated_response = None
+        st.session_state.audio_played = False
         st.rerun()
 
-    if state.chat_sessions[chat_index] and state.chat_sessions[chat_index][-1]["role"] == "user":
+    # --- Generate assistant response only if needed ---
+    if (
+        state.chat_sessions[chat_index]
+        and state.chat_sessions[chat_index][-1]["role"] == "user"
+        and not st.session_state.response_handled
+    ):
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = chat_engine.get_response(state.chat_sessions[chat_index][-1]["content"])
-
-            st.write_stream(stream_response(response))
+                st.write_stream(stream_response(response))
 
         state.chat_sessions[chat_index].append({"role": "assistant", "content": response})
         save_user_data_from_session(state.username)
 
-        # Now using state.user_config for ElevenLabs API key
+        st.session_state.generated_response = response
+        st.session_state.response_handled = True
+        st.session_state.audio_played = False
+        st.rerun()
+
+    # --- Playback assistant audio (after rerun only) ---
+    if st.session_state.generated_response and not st.session_state.audio_played:
         if state.user_config.get("elevenlabs_api"):
             try:
-                speak_text(response, state.user_config["elevenlabs_api"])
+                speak_text(st.session_state.generated_response, state.user_config["elevenlabs_api"])
+                st.session_state.audio_played = True
             except Exception as e:
                 st.error(f"Failed to play AI voice response: {e}")
 
-        st.rerun()
-
+    # --- Voice input section ---
     with st.container(border=True):
         st.markdown("##### Or speak your message:")
-        wav_audio_data = audio_recorder(
-            text="",
-            key="audio_recorder"
-        )
+        wav_audio_data = audio_recorder(text="", key="audio_recorder")
 
         if wav_audio_data is not None:
             with st.spinner("Transcribing audio..."):
-                # Now using state.user_config for whisper model
                 whisper_model_to_use = state.user_config.get("whisper_model", "tiny")
                 transcription = transcribe_audio(wav_audio_data, whisper_model_to_use)
 
             if transcription:
                 state.chat_sessions[chat_index].append({"role": "user", "content": transcription})
+                st.session_state.response_handled = False
+                st.session_state.generated_response = None
+                st.session_state.audio_played = False
                 st.rerun()
-            else:
-                pass
 
 
 # --- Settings and Quiz Page UI ---

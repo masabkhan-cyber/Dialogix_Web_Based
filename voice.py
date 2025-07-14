@@ -8,6 +8,8 @@ import scipy.io.wavfile as wavfile
 import scipy.signal as signal # New import for resampling
 import logging
 import os
+import requests
+from io import BytesIO
 # import librosa # We will try to avoid librosa for now
 
 # Configure logging for better insights
@@ -167,30 +169,56 @@ def transcribe_audio(audio_bytes, model_name="tiny"):
 def get_elevenlabs_client(api_key):
     return ElevenLabs(api_key=api_key)
 
-def speak_text(response_text, api_key):
-    """Converts text to speech using ElevenLabs API."""
-    if not api_key:
-        st.warning("🔇 ElevenLabs API key not set. Please configure it in settings to enable voice responses.")
-        logger.warning("ElevenLabs API key not set.")
-        return
-    if not response_text.strip():
-        logger.info("No text to speak from ElevenLabs (empty response).")
+def speak_text(text, api_key, voice_id="JNaMjd7t4u3EhgkVknn3", model_id="eleven_multilingual_v2"):
+    """
+    Converts text to speech using ElevenLabs API and plays it in Streamlit with autoplay using HTML.
+    Skips playback if no audio received in 10 seconds.
+    """
+    if not text.strip():
+        st.warning("⚠️ No text provided to speak.")
         return
 
     try:
-        client = get_elevenlabs_client(api_key=api_key)
-        voice_id = "JNaMjd7t4u3EhgkVknn3"
-        model_id = "eleven_multilingual_v2"
+        st.info("🔊 Generating speech...")
 
-        logger.info(f"Attempting to speak text with ElevenLabs voice_id={voice_id}, model_id={model_id}")
-        audio_stream = client.text_to_speech.stream(
-            text=response_text,
-            voice_id=voice_id,
-            model_id=model_id
-        )
-        el_stream(audio_stream)
-        logger.info("ElevenLabs audio stream played successfully.")
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json"
+        }
 
+        payload = {
+            "text": text,
+            "model_id": model_id,
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75
+            }
+        }
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+        with requests.post(url, json=payload, headers=headers, stream=True, timeout=10) as response:
+            if response.status_code != 200:
+                st.error(f"🛑 ElevenLabs API Error {response.status_code}: {response.text}")
+                return
+
+            audio_bytes = b''.join(response.iter_content(chunk_size=4096))
+
+            if not audio_bytes:
+                st.warning("🛑 No audio data received. Skipping playback.")
+                return
+
+            # Encode to base64 for HTML autoplay
+            import base64
+            b64_audio = base64.b64encode(audio_bytes).decode()
+
+            audio_html = f"""
+                <audio autoplay>
+                    <source src="data:audio/mpeg;base64,{b64_audio}" type="audio/mpeg">
+                </audio>
+            """
+            st.markdown(audio_html, unsafe_allow_html=True)
+
+    except requests.Timeout:
+        st.error("🕐 ElevenLabs API timed out after 10 seconds. No audio generated.")
     except Exception as e:
-        st.error(f"🛑 TTS Error: {e}. Check your ElevenLabs API key and network connection. Also verify voice_id/model_id.")
-        logger.exception(f"Error in speak_text (ElevenLabs): {e}")
+        st.error(f"🛑 Unexpected error during speech generation: {e}")
