@@ -2,7 +2,8 @@ import json
 import os
 import shutil
 import streamlit as st
-from chat_engine import ChatEngine
+from chat_engine import ChatEngine # Assuming ChatEngine can take a config dictionary
+from config import DEFAULT_CONFIG # Import DEFAULT_CONFIG from config.py
 
 # --- Constants ---
 CHATS_FILE = "user_chats.json"
@@ -11,12 +12,13 @@ UPLOADS_DIR = "user_uploads"
 # --- Helper Functions ---
 
 def get_default_user_data():
-    """Returns the default data structure for a new user."""
+    """Returns the default data structure for a new user, including default config."""
     return {
         "chat_sessions": [[]],
         "chat_session_names": ["New Chat"],
         "chat_pdf_paths": [[]],
-        "archived_sessions": [], 
+        "archived_sessions": [],
+        "user_config": DEFAULT_CONFIG.copy() # Each new user gets a copy of the default config
     }
 
 # --- Main Data Functions ---
@@ -45,6 +47,12 @@ def load_user_data_into_session(username):
     st.session_state.chat_session_names = user_data.get("chat_session_names", ["New Chat"])
     st.session_state.chat_pdf_paths = user_data.get("chat_pdf_paths", [[]])
     st.session_state.archived_sessions = user_data.get("archived_sessions", [])
+    
+    # Load user-specific configuration, ensuring all default keys are present
+    st.session_state.user_config = user_data.get("user_config", {}).copy()
+    for key, value in DEFAULT_CONFIG.items():
+        if key not in st.session_state.user_config:
+            st.session_state.user_config[key] = value
 
     num_sessions = len(st.session_state.chat_sessions)
     st.session_state.chat_session_names.extend(["New Chat"] * (num_sessions - len(st.session_state.chat_session_names)))
@@ -52,7 +60,8 @@ def load_user_data_into_session(username):
 
     st.session_state.chat_engines = []
     for pdf_list in st.session_state.chat_pdf_paths:
-        engine = ChatEngine(st.session_state.config)
+        # Pass the user-specific config (st.session_state.user_config) to ChatEngine
+        engine = ChatEngine(st.session_state.user_config)
         if pdf_list and os.path.exists(pdf_list[0]):
             engine.attach_pdf(pdf_list[0])
         st.session_state.chat_engines.append(engine)
@@ -61,8 +70,8 @@ def load_user_data_into_session(username):
         st.session_state.chat_sessions = [[]]
         st.session_state.chat_session_names = ["New Chat"]
         st.session_state.chat_pdf_paths = [[]]
-        st.session_state.chat_engines.append(ChatEngine(st.session_state.config))
-
+        st.session_state.chat_engines.append(ChatEngine(st.session_state.user_config)) # Use user-specific config
+        
     st.session_state.current_chat = 0
 
 def save_user_data_from_session(username):
@@ -76,6 +85,7 @@ def save_user_data_from_session(username):
         "chat_session_names": st.session_state.get("chat_session_names", ["New Chat"]),
         "chat_pdf_paths": st.session_state.get("chat_pdf_paths", [[]]),
         "archived_sessions": st.session_state.get("archived_sessions", []),
+        "user_config": st.session_state.get("user_config", DEFAULT_CONFIG.copy()), # Save user-specific config
     }
     save_all_user_data(all_data)
 
@@ -113,7 +123,8 @@ def create_new_chat_session(username):
     new_chat_name = f"Chat {len(st.session_state.chat_sessions) + 1}"
     st.session_state.chat_session_names.append(new_chat_name)
     st.session_state.chat_pdf_paths.append([])
-    st.session_state.chat_engines.append(ChatEngine(st.session_state.config))
+    # Pass the user-specific config (st.session_state.user_config) to ChatEngine for new sessions
+    st.session_state.chat_engines.append(ChatEngine(st.session_state.user_config))
     st.session_state.current_chat = len(st.session_state.chat_sessions) - 1
     save_user_data_from_session(username)
 
@@ -146,6 +157,7 @@ def archive_chat_session(username, chat_index):
         "session": st.session_state.chat_sessions[chat_index],
         "name": st.session_state.chat_session_names[chat_index],
         "pdfs": st.session_state.chat_pdf_paths[chat_index],
+        # The engine itself is not archived, it will be recreated on restore.
     }
     
     if "archived_sessions" not in st.session_state:
@@ -155,7 +167,7 @@ def archive_chat_session(username, chat_index):
     st.session_state.chat_sessions.pop(chat_index)
     st.session_state.chat_session_names.pop(chat_index)
     st.session_state.chat_pdf_paths.pop(chat_index)
-    st.session_state.chat_engines.pop(chat_index)
+    st.session_state.chat_engines.pop(chat_index) # Remove the engine as well
     
     save_user_data_from_session(username)
 
@@ -172,8 +184,8 @@ def restore_chat_session(username, archive_index):
     st.session_state.chat_session_names.append(restored_chat["name"])
     st.session_state.chat_pdf_paths.append(restored_chat["pdfs"])
     
-    # Re-create the chat engine for the restored chat
-    engine = ChatEngine(st.session_state.config)
+    # Re-create the chat engine for the restored chat with user-specific config
+    engine = ChatEngine(st.session_state.user_config)
     if restored_chat["pdfs"] and os.path.exists(restored_chat["pdfs"][0]):
         engine.attach_pdf(restored_chat["pdfs"][0])
     st.session_state.chat_engines.append(engine)

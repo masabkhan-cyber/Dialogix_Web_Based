@@ -1,8 +1,7 @@
-
 import json
 import os
 
-CONFIG_PATH = "config.json"
+CONFIG_PATH = "config.json" # This file can optionally be used for app-wide defaults or admin settings
 
 DEFAULT_CONFIG = {
     "system_prompt": (
@@ -13,6 +12,7 @@ DEFAULT_CONFIG = {
 }
 
 def load_config():
+    # This function is now less critical for per-user settings, but can load global defaults if 'config.json' exists.
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
             try:
@@ -22,5 +22,6 @@ def load_config():
     return DEFAULT_CONFIG.copy()
 
 def save_config(config):
+    # This function is for saving global defaults, if needed.
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=2)

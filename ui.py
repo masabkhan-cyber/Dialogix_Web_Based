@@ -3,23 +3,20 @@ import time
 import json
 import base64
 import streamlit as st
-# MODIFIED: Import audio_recorder instead of st_audiorec
 from audio_recorder_streamlit import audio_recorder
 from fpdf import FPDF
 from chat_engine import ChatEngine
 from auth import login_user, register_user
-# MODIFIED: Import the new data functions
 from user_data import (
     handle_pdf_upload,
-    save_user_data_from_session,
+    save_user_data_from_session, # Now importing this to save user config
     delete_pdf_for_user,
     create_new_chat_session,
     delete_chat_session,
     archive_chat_session,
-    restore_chat_session # <-- Import restore function
+    restore_chat_session
 )
-from config import save_config
-# In ui.py, change the voice import to this
+# REMOVED: from config import save_config - no longer needed here
 from voice import speak_text, transcribe_audio
 from quiz_generator import QuizGenerator
 
@@ -29,9 +26,9 @@ def add_bg_from_local(image_file):
     """Adds a background image from a local file to the Streamlit app."""
     if not os.path.exists(image_file):
         st.warning(f"Background image not found: {image_file}. Using default background.", icon="🖼️")
-        return # Exit if image doesn't exist
+        return
     with open(image_file, "rb") as img_file:
-        encoded_string = base64.b64encode(img_file.read()).decode() # CORRECTED: b64bencode -> b64encode
+        encoded_string = base64.b64encode(img_file.read()).decode()
     st.markdown(
         f"""
         <style>
@@ -50,11 +47,11 @@ def add_bg_from_local(image_file):
         div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div.st-emotion-cache-1e5z8os,
         div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"]:nth-child(2) > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div.st-emotion-cache-1e5z8os,
         div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div.st-emotion-cache-1e5z8os {{
-            background: rgba(30, 30, 30, 0.7); /* Darker, semi-transparent background */
-            backdrop-filter: blur(10px); /* Frosted glass effect */
-            border: 1px solid rgba(255, 255, 255, 0.3); /* Slightly more visible white border */
-            border-radius: 10px; /* Rounded corners */
-            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3); /* Subtle shadow for depth */
+            background: rgba(30, 30, 30, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
         }}
 
         .stTextInput label, .stSelectbox label, .stRadio label, .stSlider label {{
@@ -69,15 +66,15 @@ def add_bg_from_local(image_file):
         }}
         /* Chat messages */
         .st-chat-message-container.st-chat-message-container-user {{
-            background-color: rgba(0, 128, 255, 0.7) !important; /* Blue for user */
+            background-color: rgba(0, 128, 255, 0.7) !important;
             color: white !important;
         }}
         .st-chat-message-container.st-chat-message-container-ai {{
-            background-color: rgba(50, 50, 50, 0.8) !important; /* Darker for AI */
+            background-color: rgba(50, 50, 50, 0.8) !important;
             color: white !important;
         }}
         .st-chat-message-container p {{
-            color: white !important; /* Ensure text in chat messages is white */
+            color: white !important;
         }}
         </style>
         """,
@@ -111,9 +108,9 @@ def create_quiz_pdf(quiz_data):
 
         pdf.set_font("Arial", '', 12)
         for opt in options:
-            pdf.set_x(initial_x)   # Go to the left margin
-            pdf.cell(indent)       # Create the indent space
-            pdf.multi_cell(0, 6, f"- {opt}") # Write the option text
+            pdf.set_x(initial_x)
+            pdf.cell(indent)
+            pdf.multi_cell(0, 6, f"- {opt}")
         pdf.ln(6)
 
     # --- Page 2: Answer Key ---
@@ -125,7 +122,7 @@ def create_quiz_pdf(quiz_data):
     pdf.set_font("Arial", '', 12)
     for i, q in enumerate(quiz_data):
         answer_text = f"Q{i+1}: {q['answer']}".encode('latin-1', 'replace').decode('latin-1')
-        pdf.set_x(initial_x) # Start at the margin
+        pdf.set_x(initial_x)
         pdf.multi_cell(0, 6, answer_text)
         pdf.ln(4)
 
@@ -135,7 +132,7 @@ def create_quiz_pdf(quiz_data):
 # --- Authentication UI ---
 def show_login_form():
     """Displays a modern, centered login and registration form using tabs."""
-    add_bg_from_local('background.jpg') # Ensure background.jpg exists
+    add_bg_from_local('background.jpg')
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         with st.container(border=True):
@@ -174,7 +171,7 @@ def sidebar_session_selector():
 
     if "confirming_action_index" not in st.session_state:
         st.session_state.confirming_action_index = None
-    if "editing_chat_index" not in st.session_state: # Initialize if not present
+    if "editing_chat_index" not in st.session_state:
         st.session_state.editing_chat_index = None
 
     def handle_rename(index):
@@ -184,19 +181,16 @@ def sidebar_session_selector():
             save_user_data_from_session(st.session_state.username)
             st.toast(f"Chat renamed to '{new_name}'", icon="✏️")
         st.session_state.editing_chat_index = None
-        st.rerun() # Rerun to update the button immediately
+        st.rerun()
 
     def adjust_current_chat_after_action(acted_on_index):
-        # Adjust current_chat if the deleted/archived session was before or is the current one
         if st.session_state.current_chat == acted_on_index:
-            # If the current chat is deleted/archived, switch to the first available chat (or none)
             st.session_state.current_chat = max(0, acted_on_index - 1)
-            # If no chats left, create a new one
             if not st.session_state.chat_session_names:
                 create_new_chat_session(st.session_state.username)
                 st.session_state.current_chat = 0
         elif st.session_state.current_chat > acted_on_index:
-            st.session_state.current_chat -= 1 # Shift index if a preceding chat was removed
+            st.session_state.current_chat -= 1
 
     for i, name in enumerate(st.session_state.chat_session_names):
         if st.session_state.confirming_action_index == i:
@@ -234,25 +228,21 @@ def sidebar_session_selector():
                         st.session_state.current_chat = i
                         st.session_state.page = "chat"
                         st.session_state.editing_chat_index = None
-                        st.session_state.confirming_action_index = None # Clear any pending confirms
+                        st.session_state.confirming_action_index = None
                         st.rerun()
             with col2:
                 if st.session_state.get("editing_chat_index") == i:
-                    # No explicit "done" button needed if on_change is used, but can keep for visual clarity
-                    # if st.button("✅", key=f"done_{i}", help="Confirm rename"):
-                    #    st.session_state.editing_chat_index = None
-                    #    st.rerun()
-                    pass # Handled by on_change
+                    pass
                 else:
                     if st.button("✏️", key=f"edit_{i}", help="Rename chat"):
                         st.session_state.editing_chat_index = i
-                        st.session_state.confirming_action_index = None # Clear any pending confirms
+                        st.session_state.confirming_action_index = None
                         st.rerun()
             with col3:
                 if st.session_state.get("editing_chat_index") != i:
                     if st.button("🗑️", key=f"delete_archive_{i}", help="Delete or Archive chat"):
                         st.session_state.confirming_action_index = i
-                        st.session_state.editing_chat_index = None # Stop editing if attempting delete/archive
+                        st.session_state.editing_chat_index = None
                         st.rerun()
 
     if st.sidebar.button("➕ New Chat", use_container_width=True):
@@ -262,37 +252,32 @@ def sidebar_session_selector():
         st.session_state.confirming_action_index = None
         st.rerun()
 
-    # MODIFIED: Archived chats expander now includes restore buttons
     if st.session_state.get("archived_sessions"):
         with st.sidebar.expander("🗄️ Archived Chats"):
             if not st.session_state.archived_sessions:
                 st.caption("No archived chats.")
             else:
-                # Iterate over a copy to avoid issues if list changes during iteration
                 for idx, archived in enumerate(list(st.session_state.archived_sessions)):
                     col1, col2 = st.columns([0.8, 0.2])
                     with col1:
                         st.write(f"{archived['name']}")
                     with col2:
                         if st.button("⬆️", key=f"restore_{idx}", help="Restore this chat"):
-                            # The restore_chat_session function should remove from archived and add to main sessions
                             restore_chat_session(st.session_state.username, idx)
                             st.toast(f"Restored chat '{archived['name']}'!", icon="🎉")
                             st.rerun()
 
 def show_pdf_manager_in_sidebar(state):
     """Renders the PDF uploader and manager in a sidebar expander."""
-    # Ensure current_chat is a valid index
     if not hasattr(state, 'chat_pdf_paths') or not state.chat_pdf_paths:
         st.sidebar.expander("📄 PDF Management").info("Please create a chat session first to manage PDFs.")
         return
 
     idx = state.current_chat
     if idx >= len(state.chat_pdf_paths):
-        # Fallback if current_chat index is out of bounds (e.g., after a deletion)
         state.current_chat = 0
         idx = 0
-        st.rerun() # Rerun to correctly initialize
+        st.rerun()
 
     chat_engine = state.chat_engines[idx]
 
@@ -302,15 +287,13 @@ def show_pdf_manager_in_sidebar(state):
         uploaded_file = st.file_uploader("Upload a new PDF", type=["pdf"], key=f"pdf_uploader_{idx}")
 
         if uploaded_file:
-            # Check if file with the same name is already associated with this chat
             processed_pdf_names = [os.path.basename(p) for p in state.chat_pdf_paths[idx]]
             if uploaded_file.name not in processed_pdf_names:
                 with st.spinner(f"Processing '{uploaded_file.name}'..."):
-                    # handle_pdf_upload saves the file and updates state.chat_pdf_paths
                     handle_pdf_upload(state.username, uploaded_file, idx)
-                    save_user_data_from_session(state.username) # Save updated session data
+                    save_user_data_from_session(state.username)
                 st.success(f"✅ PDF '{uploaded_file.name}' added and processed.")
-                st.rerun() # Rerun to update the PDF list
+                st.rerun()
             else:
                 st.info(f"PDF '{uploaded_file.name}' is already associated with this chat.")
 
@@ -320,28 +303,25 @@ def show_pdf_manager_in_sidebar(state):
         if state.chat_pdf_paths and state.chat_pdf_paths[idx]:
             pdf_options = [os.path.basename(p) for p in state.chat_pdf_paths[idx]]
 
-            # Determine the index of the currently active PDF for the selectbox default
             active_pdf_name = None
             if hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path:
                 active_pdf_name = os.path.basename(chat_engine.rag.pdf_path)
 
             try:
                 active_pdf_index = pdf_options.index(active_pdf_name) if active_pdf_name in pdf_options else 0
-            except ValueError: # Fallback if active PDF name isn't in options (e.g., deleted externally)
+            except ValueError:
                 active_pdf_index = 0
 
             selected_pdf_name = st.selectbox("Select a PDF to make it active:", pdf_options, index=active_pdf_index, key=f"select_active_pdf_{idx}")
 
             selected_pdf_path = next((p for p in state.chat_pdf_paths[idx] if os.path.basename(p) == selected_pdf_name), None)
 
-            # Only re-attach if a different PDF is selected or no PDF is currently active
             if selected_pdf_path and (not hasattr(chat_engine, 'rag') or not chat_engine.rag or chat_engine.rag.pdf_path != selected_pdf_path):
                 with st.spinner(f"Activating '{selected_pdf_name}'..."):
                     ok, msg = chat_engine.attach_pdf(selected_pdf_path)
                     st.toast(f"Activated '{selected_pdf_name}'" if ok else msg, icon="✅" if ok else "❌")
-                    if not ok: # If activation failed, inform user to check chat engine or PDF
+                    if not ok:
                         st.error(f"Failed to activate PDF: {msg}")
-                    # No rerun here, let it proceed to display the status, rerun if deletion happens
             elif selected_pdf_path and hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path == selected_pdf_path:
                 st.info(f"'{selected_pdf_name}' is currently active.")
             elif not selected_pdf_path:
@@ -352,18 +332,16 @@ def show_pdf_manager_in_sidebar(state):
             st.write(f"**Delete selected PDF:** `{selected_pdf_name}`")
             if st.button("🗑️ Delete this PDF", type="secondary", use_container_width=True, key=f"delete_pdf_{idx}_{selected_pdf_name}"):
                 if selected_pdf_path:
-                    # Deactivate if it's the current one
                     if hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path == selected_pdf_path:
-                        chat_engine.rag = None # Detach RAG engine
+                        chat_engine.rag = None
                         st.toast(f"Deactivated '{selected_pdf_name}' as it's being deleted.", icon="ℹ️")
 
-                    # Delete the file and update session state
                     success, message = delete_pdf_for_user(selected_pdf_path)
                     if success:
                         state.chat_pdf_paths[idx].remove(selected_pdf_path)
                         save_user_data_from_session(state.username)
                         st.toast(message, icon="🗑️")
-                        st.rerun() # Rerun to update the selectbox options
+                        st.rerun()
                     else:
                         st.toast(message, icon="❌")
 
@@ -399,15 +377,13 @@ def stream_response(response):
 
 def show_chat_page(state):
     """Renders the main chat interface, including messages and input controls."""
-    # Ensure current_chat index is valid
     if state.current_chat >= len(state.chat_engines):
         if len(state.chat_engines) > 0:
             state.current_chat = 0
         else:
-            # If no chat engines exist, create a new session
             create_new_chat_session(state.username)
             state.current_chat = 0
-            st.rerun() # Rerun to initialize the new session properly
+            st.rerun()
 
     chat_index = state.current_chat
     chat_engine = state.chat_engines[chat_index]
@@ -415,18 +391,15 @@ def show_chat_page(state):
     if not state.chat_sessions[chat_index]:
         welcome_message()
 
-    # Display chat messages
     for msg in state.chat_sessions[chat_index]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Handle user input from text box
     user_text_input = st.chat_input("Type your message here...", key="chat_text_input")
     if user_text_input:
         state.chat_sessions[chat_index].append({"role": "user", "content": user_text_input})
         st.rerun()
 
-    # Process AI response if the last message was from the user
     if state.chat_sessions[chat_index] and state.chat_sessions[chat_index][-1]["role"] == "user":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
@@ -437,20 +410,17 @@ def show_chat_page(state):
         state.chat_sessions[chat_index].append({"role": "assistant", "content": response})
         save_user_data_from_session(state.username)
 
-        # Speak the response if ElevenLabs API key is configured
-        if state.config.get("elevenlabs_api"):
+        # Now using state.user_config for ElevenLabs API key
+        if state.user_config.get("elevenlabs_api"):
             try:
-                speak_text(response, state.config["elevenlabs_api"])
+                speak_text(response, state.user_config["elevenlabs_api"])
             except Exception as e:
                 st.error(f"Failed to play AI voice response: {e}")
 
-        st.rerun() # Rerun to update the chat display
+        st.rerun()
 
-    # ADDED: Wrap the input and audio recorder in a container for consistent styling
-    with st.container(border=True): # Use border=True to apply existing container styling
-        # REMOVED: st.markdown("---") was here
+    with st.container(border=True):
         st.markdown("##### Or speak your message:")
-        # MODIFIED: Use audio_recorder from audio-recorder-streamlit, removed all unsupported arguments
         wav_audio_data = audio_recorder(
             text="",
             key="audio_recorder"
@@ -458,41 +428,42 @@ def show_chat_page(state):
 
         if wav_audio_data is not None:
             with st.spinner("Transcribing audio..."):
-                # Ensure whisper_model is available in config
-                whisper_model_to_use = state.config.get("whisper_model", "tiny")
+                # Now using state.user_config for whisper model
+                whisper_model_to_use = state.user_config.get("whisper_model", "tiny")
                 transcription = transcribe_audio(wav_audio_data, whisper_model_to_use)
 
             if transcription:
                 state.chat_sessions[chat_index].append({"role": "user", "content": transcription})
-                st.rerun() # Rerun to process the transcribed input as a new user message
+                st.rerun()
             else:
-                # Error messages are already handled by transcribe_audio internally
-                pass # No additional st.warning here, as transcribe_audio already gives feedback
+                pass
 
 
 # --- Settings and Quiz Page UI ---
 
 def show_settings_page(state):
-    """Renders the global application settings on a dedicated page."""
-    st.title("⚙️ Application Settings")
+    """Renders the user-specific application settings on a dedicated page."""
+    st.title("⚙️ Your Settings")
 
     with st.container(border=True):
         st.header("System Prompt")
-        state.config["system_prompt"] = st.text_area(
+        # MODIFIED: Use st.session_state.user_config instead of st.session_state.config
+        state.user_config["system_prompt"] = st.text_area(
             "This prompt guides the AI's personality and responses.",
-            value=state.config.get("system_prompt", "You are a helpful AI assistant."), # Default value
+            value=state.user_config.get("system_prompt", "You are a helpful AI assistant."),
             height=150,
             key="system_prompt_settings"
         )
 
     with st.container(border=True):
         st.header("Whisper Model")
-        whisper_models = ["tiny", "base", "small", "medium", "large", "large-v2"] # Added large-v2 as it's common
-        current_whisper_model = state.config.get("whisper_model", "tiny")
+        whisper_models = ["tiny", "base", "small", "medium", "large", "large-v2"]
+        # MODIFIED: Use st.session_state.user_config for whisper model
+        current_whisper_model = state.user_config.get("whisper_model", "tiny")
         if current_whisper_model not in whisper_models:
-            current_whisper_model = "tiny" # Fallback if stored model is not in list
+            current_whisper_model = "tiny"
 
-        state.config["whisper_model"] = st.selectbox(
+        state.user_config["whisper_model"] = st.selectbox(
             "Select the model size for audio transcription. Larger models are more accurate but slower.",
             whisper_models,
             index=whisper_models.index(current_whisper_model),
@@ -502,9 +473,10 @@ def show_settings_page(state):
 
     with st.container(border=True):
         st.header("ElevenLabs API Key")
-        state.config["elevenlabs_api"] = st.text_input(
+        # MODIFIED: Use st.session_state.user_config for ElevenLabs API key
+        state.user_config["elevenlabs_api"] = st.text_input(
             "Enter your API key for text-to-speech functionality.",
-            value=state.config.get("elevenlabs_api", ""),
+            value=state.user_config.get("elevenlabs_api", ""),
             type="password",
             key="elevenlabs_api_settings"
         )
@@ -512,7 +484,8 @@ def show_settings_page(state):
 
 
     if st.button("💾 Save Settings", use_container_width=True, type="primary"):
-        save_config(state.config)
+        # MODIFIED: Call save_user_data_from_session to save user-specific config
+        save_user_data_from_session(state.username)
         st.success("✅ Settings saved successfully.")
         st.toast("Settings have been updated!", icon="👍")
 
@@ -522,13 +495,12 @@ def show_quiz_page(state):
     st.title("🧠 Quiz Generator")
     st.markdown("Create a quiz from a topic or a PDF document.")
 
-    # Reset quiz state when navigating to this page from another page
     if 'page' in st.session_state and st.session_state.page != 'quiz':
         keys_to_clear = ['quiz_data', 'user_answers', 'show_score']
         for key in keys_to_clear:
             if key in st.session_state:
                 del st.session_state[key]
-        st.session_state.page = 'quiz' # Set current page to quiz to prevent re-clearing on next rerun
+        st.session_state.page = 'quiz'
 
     if not st.session_state.get('quiz_data'):
         with st.container(border=True):
@@ -548,7 +520,7 @@ def show_quiz_page(state):
                 topic = st.text_input("Enter quiz topic:", placeholder="e.g., 'The History of Space Exploration'", key="quiz_topic_input")
                 if topic:
                     source_input_valid = True
-            else: # Source Type == "PDF"
+            else:
                 current_chat_pdfs = st.session_state.chat_pdf_paths[st.session_state.current_chat]
                 if not current_chat_pdfs:
                     st.warning("No PDFs in this chat. Please upload one via the sidebar.", icon="⚠️")
@@ -559,8 +531,9 @@ def show_quiz_page(state):
                     if pdf_path:
                         source_input_valid = True
 
+            # MODIFIED: Pass st.session_state.user_config to QuizGenerator
             if st.button("✨ Generate Quiz", use_container_width=True, type="primary", disabled=not source_input_valid):
-                generator = QuizGenerator(st.session_state.config)
+                generator = QuizGenerator(st.session_state.user_config)
                 with st.spinner("Generating your quiz... This may take a moment."):
                     if source_type == "Topic":
                         response = generator.generate_from_topic(topic, difficulty, num_questions)
@@ -568,7 +541,6 @@ def show_quiz_page(state):
                         response = generator.generate_from_pdf(pdf_path, difficulty, num_questions)
 
                 try:
-                    # Clean the response to ensure it's valid JSON
                     cleaned_str = response.strip()
                     if cleaned_str.startswith("```json"):
                         cleaned_str = cleaned_str[len("```json"):].strip()
@@ -577,18 +549,17 @@ def show_quiz_page(state):
 
                     quiz_data = json.loads(cleaned_str)
 
-                    # Basic validation of quiz structure
                     if isinstance(quiz_data, list) and all('question' in q and 'options' in q and 'answer' in q for q in quiz_data):
                         st.session_state.quiz_data = quiz_data
-                        st.session_state.user_answers = [None] * len(quiz_data) # Initialize answers
-                        st.session_state.show_score = False # Ensure we show quiz, not score immediately
+                        st.session_state.user_answers = [None] * len(quiz_data)
+                        st.session_state.show_score = False
                         st.rerun()
                     else:
                         st.error("The AI returned an invalid quiz format. Please ensure it contains questions, options, and answers.", icon="🚨")
-                        st.code(response) # Show raw response for debugging
+                        st.code(response)
                 except (json.JSONDecodeError, TypeError) as e:
                     st.error(f"Failed to parse the quiz from the AI's response: {e}. Check the AI's output format.", icon="🚨")
-                    st.code(response) # Show raw response for debugging
+                    st.code(response)
 
     if st.session_state.get('quiz_data') and not st.session_state.get('show_score'):
         with st.container(border=True):
@@ -598,16 +569,14 @@ def show_quiz_page(state):
                 for i, q in enumerate(st.session_state.quiz_data):
                     st.markdown(f"**Question {i+1}: {q['question']}**")
                     options = q.get('options', [])
-                    # Ensure the correct answer is always an option
                     if q['answer'] not in options:
                         options.append(q['answer'])
-                    # Shuffle options to prevent answer always being in same position
                     import random
                     random.shuffle(options)
                     user_choice = st.radio("Options:", options, key=f"q_{i}", label_visibility="collapsed")
                     user_answers.append(user_choice)
 
-                st.markdown("---") # Separator before submit button
+                st.markdown("---")
                 if st.form_submit_button("Submit Answers", use_container_width=True, type="primary"):
                     st.session_state.user_answers = user_answers
                     st.session_state.show_score = True
