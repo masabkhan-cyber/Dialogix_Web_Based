@@ -3,6 +3,7 @@ import time
 import json
 import base64
 import streamlit as st
+import re
 from audio_recorder_streamlit import audio_recorder
 from fpdf import FPDF
 from chat_engine import ChatEngine
@@ -130,129 +131,156 @@ def create_quiz_pdf(quiz_data):
 
 
 # --- Authentication UI ---
+def is_valid_username(username):
+    """Validates a username using regex."""
+    return bool(re.match(r"^[a-zA-Z0-9_]{3,20}$", username))
+
 def show_login_form():
-    """Displays a modern, centered login and registration form using tabs."""
+    """Displays a secure login/register form without password strength meter."""
     add_bg_from_local('background.jpg')
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.container(border=True):
-            st.markdown("<h1 style='text-align: center;'>🤖 Dialogix</h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; margin-bottom: 20px;'>Your AI-powered learning assistant.</p>", unsafe_allow_html=True)
-            login_tab, register_tab = st.tabs(["**Login**", "**Register**"])
+            st.markdown("<h1 style='text-align: center;'>Welcome!</h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center;'>Login or register to continue</p>", unsafe_allow_html=True)
+
+            login_tab, register_tab = st.tabs(["🔓 Login", "🆕 Register"])
+
+            # --- LOGIN TAB ---
             with login_tab:
                 with st.form(key="login_form"):
-                    st.text_input("Username", placeholder="Enter your username", key="login_user")
-                    st.text_input("Password", type="password", placeholder="Enter your password", key="login_pass")
-                    st.markdown("</br>", unsafe_allow_html=True)
-                    if st.form_submit_button(label="Login", use_container_width=True, type="primary"):
-                        success, message = login_user(st.session_state["login_user"], st.session_state["login_pass"])
-                        if success:
-                            st.toast(message, icon="🎉")
-                            st.rerun()
+                    username = st.text_input("👤 Username", placeholder="Enter your username", key="login_user")
+                    password = st.text_input("🔒 Password", type="password", placeholder="Enter your password", key="login_pass")
+                    login_btn = st.form_submit_button("Login", use_container_width=True, type="primary")
+                    if login_btn:
+                        if not username or not password:
+                            st.error("Please fill in all fields.", icon="❗")
                         else:
-                            st.error(message, icon="❌")
+                            success, message = login_user(username, password)
+                            if success:
+                                st.toast(message, icon="🎉")
+                                st.session_state.just_submitted_user_message = False
+                                st.rerun()
+                            else:
+                                st.error(message, icon="❌")
+
+            # --- REGISTER TAB ---
             with register_tab:
                 with st.form(key="register_form"):
-                    st.text_input("Username", placeholder="Create a new username", key="reg_user")
-                    st.text_input("Password", type="password", placeholder="Create a strong password", key="reg_pass")
-                    st.markdown("</br>", unsafe_allow_html=True)
-                    if st.form_submit_button(label="Register", use_container_width=True):
-                        success, message = register_user(st.session_state["reg_user"], st.session_state["reg_pass"])
-                        if success:
-                            st.success(message, icon="✅")
+                    reg_username = st.text_input("👤 Choose a Username", placeholder="e.g., johndoe_123", key="reg_user")
+                    if reg_username and not is_valid_username(reg_username):
+                        st.warning("Username must be 3-20 characters and contain only letters, numbers, or underscores.", icon="⚠️")
+
+                    reg_password = st.text_input("🔑 Password", type="password", key="reg_pass", placeholder="At least 8 characters")
+                    confirm_password = st.text_input("✅ Confirm Password", type="password", key="confirm_pass")
+                    agree = st.checkbox("I agree to the Terms and Privacy Policy")
+                    submit_btn = st.form_submit_button("Register", use_container_width=True)
+
+                    if submit_btn:
+                        errors = []
+                        if not reg_username or not reg_password or not confirm_password:
+                            errors.append("All fields are required.")
+                        elif not is_valid_username(reg_username):
+                            errors.append("Invalid username format.")
+                        elif len(reg_password) < 8:
+                            errors.append("Password must be at least 8 characters.")
+                        elif reg_password != confirm_password:
+                            errors.append("Passwords do not match.")
+                        elif not agree:
+                            errors.append("You must agree to the terms.")
+
+                        if errors:
+                            for err in errors:
+                                st.error(err, icon="🚫")
                         else:
-                            st.error(message, icon="❌")
+                            success, message = register_user(reg_username, reg_password)
+                            if success:
+                                st.success(message, icon="✅")
+                            else:
+                                st.error(message, icon="❌")
 
 # --- Sidebar UI Components ---
 
 def sidebar_session_selector():
-    """Manages the chat session selection, renaming, and deletion in the sidebar."""
+    """Modern sidebar with dropdown chat actions, rename, delete, and archive."""
     st.sidebar.title("💬 My Chats")
 
-    if "confirming_action_index" not in st.session_state:
-        st.session_state.confirming_action_index = None
-    if "editing_chat_index" not in st.session_state:
-        st.session_state.editing_chat_index = None
+    if "chat_menu_open" not in st.session_state:
+        st.session_state.chat_menu_open = None
 
-    def handle_rename(index):
-        new_name = st.session_state[f"rename_input_{index}"]
-        if new_name and new_name != st.session_state.chat_session_names[index]:
-            st.session_state.chat_session_names[index] = new_name
-            save_user_data_from_session(st.session_state.username)
-            st.toast(f"Chat renamed to '{new_name}'", icon="✏️")
-        st.session_state.editing_chat_index = None
-
-    def adjust_current_chat_after_action(acted_on_index):
-        if st.session_state.current_chat == acted_on_index:
-            st.session_state.current_chat = max(0, acted_on_index - 1)
+    def adjust_current_chat_after_action(index):
+        if st.session_state.current_chat == index:
+            st.session_state.current_chat = max(0, index - 1)
             if not st.session_state.chat_session_names:
                 create_new_chat_session(st.session_state.username)
                 st.session_state.current_chat = 0
-        elif st.session_state.current_chat > acted_on_index:
+        elif st.session_state.current_chat > index:
             st.session_state.current_chat -= 1
 
-    for i, name in enumerate(st.session_state.chat_session_names):
-        if st.session_state.confirming_action_index == i:
-            with st.sidebar.container(border=True):
-                st.warning(f"Action for **'{name}'**?")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("Delete", key=f"confirm_delete_{i}", use_container_width=True, type="primary"):
-                        deleted_name = st.session_state.chat_session_names[i]
-                        delete_chat_session(st.session_state.username, i)
-                        adjust_current_chat_after_action(i)
-                        st.session_state.confirming_action_index = None
-                        st.toast(f"Chat '{deleted_name}' deleted.", icon="🗑️")
-                        st.rerun()
-                with col2:
-                    if st.button("Archive", key=f"confirm_archive_{i}", use_container_width=True):
-                        archived_name = st.session_state.chat_session_names[i]
-                        archive_chat_session(st.session_state.username, i)
-                        adjust_current_chat_after_action(i)
-                        st.session_state.confirming_action_index = None
-                        st.toast(f"Chat '{archived_name}' archived.", icon="🗄️")
-                        st.rerun()
-                with col3:
-                    if st.button("Cancel", key=f"cancel_action_{i}", use_container_width=True):
-                        st.session_state.confirming_action_index = None
-                        st.rerun()
-        else:
-            col1, col2, col3 = st.sidebar.columns([0.7, 0.15, 0.15])
-            with col1:
-                if st.session_state.get("editing_chat_index") == i:
-                    st.text_input("Rename chat", value=name, key=f"rename_input_{i}", on_change=handle_rename, args=(i,), label_visibility="collapsed")
-                else:
-                    button_type = "primary" if st.session_state.current_chat == i and st.session_state.page == "chat" else "secondary"
-                    if st.button(name, key=f"chat_{i}", use_container_width=True, type=button_type):
-                        st.session_state.current_chat = i
-                        st.session_state.page = "chat"
-                        st.session_state.editing_chat_index = None
-                        st.session_state.confirming_action_index = None
-                        st.rerun()
-            with col2:
-                if st.session_state.get("editing_chat_index") == i:
-                    pass
-                else:
-                    if st.button("✏️", key=f"edit_{i}", help="Rename chat"):
-                        st.session_state.editing_chat_index = i
-                        st.session_state.confirming_action_index = None
-                        st.rerun()
-            with col3:
-                if st.session_state.get("editing_chat_index") != i:
-                    if st.button("🗑️", key=f"delete_archive_{i}", help="Delete or Archive chat"):
-                        st.session_state.confirming_action_index = i
-                        st.session_state.editing_chat_index = None
-                        st.rerun()
+    def handle_rename(index):
+        new_name = st.session_state.get(f"rename_input_{index}", "").strip()
+        if new_name and new_name != st.session_state.chat_session_names[index]:
+            st.session_state.chat_session_names[index] = new_name
+            save_user_data_from_session(st.session_state.username)
+            st.toast(f"Renamed to '{new_name}'", icon="✏️")
+        st.session_state.chat_menu_open = None
+        st.rerun()
 
+    def handle_delete(index):
+        deleted_name = st.session_state.chat_session_names[index]
+        delete_chat_session(st.session_state.username, index)
+        adjust_current_chat_after_action(index)
+        st.toast(f"Deleted chat '{deleted_name}'", icon="🗑️")
+        st.session_state.chat_menu_open = None
+        st.rerun()
+
+    def handle_archive(index):
+        archived_name = st.session_state.chat_session_names[index]
+        archive_chat_session(st.session_state.username, index)
+        adjust_current_chat_after_action(index)
+        st.toast(f"Archived '{archived_name}'", icon="🗄️")
+        st.session_state.chat_menu_open = None
+        st.rerun()
+
+    for i, name in enumerate(st.session_state.chat_session_names):
+        with st.sidebar.container(border=True):
+            col1, col2 = st.columns([0.75, 0.25])
+            with col1:
+                btn_type = "primary" if st.session_state.current_chat == i and st.session_state.page == "chat" else "secondary"
+                if st.button(name, key=f"chat_{i}", use_container_width=True, type=btn_type):
+                    st.session_state.current_chat = i
+                    st.session_state.page = "chat"
+                    st.session_state.chat_menu_open = None
+                    st.rerun()
+            with col2:
+                if st.button("⋮", key=f"menu_{i}", help="Chat options", use_container_width=True):
+                    st.session_state.chat_menu_open = i if st.session_state.chat_menu_open != i else None
+                    st.rerun()
+
+            if st.session_state.chat_menu_open == i:
+                with st.expander("⚙️ Options", expanded=True):
+                    st.text_input("✏️ Rename", value=name, key=f"rename_input_{i}")
+                    colA, colB = st.columns(2)
+                    with colA:
+                        if st.button("💾 Save", key=f"rename_btn_{i}", use_container_width=True):
+                            handle_rename(i)
+                    with colB:
+                        if st.button("🗑️ Delete", key=f"delete_btn_{i}", use_container_width=True):
+                            handle_delete(i)
+                    if st.button("🗄️ Archive", key=f"archive_btn_{i}", use_container_width=True):
+                        handle_archive(i)
+
+    st.sidebar.markdown("---")
     if st.sidebar.button("➕ New Chat", use_container_width=True):
         create_new_chat_session(st.session_state.username)
         st.session_state.page = "chat"
-        st.session_state.editing_chat_index = None
-        st.session_state.confirming_action_index = None
+        st.session_state.chat_menu_open = None
         st.rerun()
 
+    # Archived
     if st.session_state.get("archived_sessions"):
-        with st.sidebar.expander("🗄️ Archived Chats"):
+        with st.sidebar.expander("🗄️ Archived Chats", expanded=False):
             if not st.session_state.archived_sessions:
                 st.caption("No archived chats.")
             else:
@@ -263,13 +291,13 @@ def sidebar_session_selector():
                     with col2:
                         if st.button("⬆️", key=f"restore_{idx}", help="Restore this chat"):
                             restore_chat_session(st.session_state.username, idx)
-                            st.toast(f"Restored chat '{archived['name']}'!", icon="🎉")
+                            st.toast(f"Restored '{archived['name']}'", icon="🎉")
                             st.rerun()
 
 def show_pdf_manager_in_sidebar(state):
-    """Renders the PDF uploader and manager in a sidebar expander."""
+    """Improved PDF uploader and selector per chat."""
     if not hasattr(state, 'chat_pdf_paths') or not state.chat_pdf_paths:
-        st.sidebar.expander("📄 PDF Management").info("Please create a chat session first to manage PDFs.")
+        st.sidebar.expander("📄 PDF Management").info("Create a chat session to manage PDFs.")
         return
 
     idx = state.current_chat
@@ -281,8 +309,7 @@ def show_pdf_manager_in_sidebar(state):
     chat_engine = state.chat_engines[idx]
 
     with st.sidebar.expander("📄 PDF Management", expanded=False):
-        st.subheader("Add PDF to this Chat")
-
+        st.subheader("Upload PDF")
         uploaded_file = st.file_uploader("Upload a new PDF", type=["pdf"], key=f"pdf_uploader_{idx}")
 
         if uploaded_file:
@@ -291,50 +318,39 @@ def show_pdf_manager_in_sidebar(state):
                 with st.spinner(f"Processing '{uploaded_file.name}'..."):
                     handle_pdf_upload(state.username, uploaded_file, idx)
                     save_user_data_from_session(state.username)
-                st.success(f"✅ PDF '{uploaded_file.name}' added and processed.")
+                st.success(f"✅ PDF '{uploaded_file.name}' processed.")
                 st.rerun()
             else:
-                st.info(f"PDF '{uploaded_file.name}' is already associated with this chat.")
+                st.info(f"'{uploaded_file.name}' already uploaded.")
 
-        st.markdown("---")
-        st.subheader("Activate & Manage PDFs")
+        if state.chat_pdf_paths[idx]:
+            st.markdown("---")
+            st.subheader("Active PDF")
 
-        if state.chat_pdf_paths and state.chat_pdf_paths[idx]:
             pdf_options = [os.path.basename(p) for p in state.chat_pdf_paths[idx]]
-
             active_pdf_name = None
             if hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path:
                 active_pdf_name = os.path.basename(chat_engine.rag.pdf_path)
 
-            try:
-                active_pdf_index = pdf_options.index(active_pdf_name) if active_pdf_name in pdf_options else 0
-            except ValueError:
-                active_pdf_index = 0
-
-            selected_pdf_name = st.selectbox("Select a PDF to make it active:", pdf_options, index=active_pdf_index, key=f"select_active_pdf_{idx}")
-
+            selected_pdf_name = st.selectbox("Select active PDF:", pdf_options, index=pdf_options.index(active_pdf_name) if active_pdf_name in pdf_options else 0, key=f"select_pdf_{idx}")
             selected_pdf_path = next((p for p in state.chat_pdf_paths[idx] if os.path.basename(p) == selected_pdf_name), None)
 
             if selected_pdf_path and (not hasattr(chat_engine, 'rag') or not chat_engine.rag or chat_engine.rag.pdf_path != selected_pdf_path):
                 with st.spinner(f"Activating '{selected_pdf_name}'..."):
                     ok, msg = chat_engine.attach_pdf(selected_pdf_path)
-                    st.toast(f"Activated '{selected_pdf_name}'" if ok else msg, icon="✅" if ok else "❌")
+                    st.toast(msg, icon="✅" if ok else "❌")
                     if not ok:
-                        st.error(f"Failed to activate PDF: {msg}")
-            elif selected_pdf_path and hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path == selected_pdf_path:
-                st.info(f"'{selected_pdf_name}' is currently active.")
-            elif not selected_pdf_path:
-                st.warning("Selected PDF path could not be resolved.")
+                        st.error(f"Activation failed: {msg}")
+
+            if selected_pdf_path and hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path == selected_pdf_path:
+                st.info(f"'{selected_pdf_name}' is active.")
 
             st.markdown("---")
-
-            st.write(f"**Delete selected PDF:** `{selected_pdf_name}`")
             if st.button("🗑️ Delete this PDF", type="secondary", use_container_width=True, key=f"delete_pdf_{idx}_{selected_pdf_name}"):
                 if selected_pdf_path:
                     if hasattr(chat_engine, 'rag') and chat_engine.rag and chat_engine.rag.pdf_path == selected_pdf_path:
                         chat_engine.rag = None
-                        st.toast(f"Deactivated '{selected_pdf_name}' as it's being deleted.", icon="ℹ️")
-
+                        st.toast(f"Deactivated '{selected_pdf_name}'", icon="ℹ️")
                     success, message = delete_pdf_for_user(selected_pdf_path)
                     if success:
                         state.chat_pdf_paths[idx].remove(selected_pdf_path)
@@ -342,28 +358,22 @@ def show_pdf_manager_in_sidebar(state):
                         st.toast(message, icon="🗑️")
                         st.rerun()
                     else:
-                        st.toast(message, icon="❌")
-
-                else:
-                    st.warning("No PDF selected for deletion or path not found.")
-        else:
-            st.info("No PDFs have been uploaded for this chat yet. Upload one above!")
-
+                        st.error(message)
 
 def sidebar_navigation():
-    """Adds navigation buttons to the sidebar for settings and quiz generator."""
+    """Sidebar navigation options."""
     st.sidebar.markdown("---")
-    if st.sidebar.button("💬 Back to Chat", use_container_width=True):
-        st.session_state.page = "chat"
-        st.rerun()
+    st.sidebar.markdown("### 🧭 Navigation")
+    nav = {
+        "💬 Back to Chat": "chat",
+        "🧠 Quiz Generator": "quiz",
+        "⚙️ Settings": "settings"
+    }
+    for label, page in nav.items():
+        if st.sidebar.button(label, use_container_width=True):
+            st.session_state.page = page
+            st.rerun()
 
-    if st.sidebar.button("🧠 Quiz Generator", use_container_width=True):
-        st.session_state.page = "quiz"
-        st.rerun()
-
-    if st.sidebar.button("⚙️ Settings", use_container_width=True):
-        st.session_state.page = "settings"
-        st.rerun()
 
 
 # --- Main Page UI ---
