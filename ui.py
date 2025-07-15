@@ -433,13 +433,44 @@ def show_chat_page(state):
     ):
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = chat_engine.get_response(state.chat_sessions[chat_index][-1]["content"])
-                st.write_stream(stream_response(response))
+                raw_response = chat_engine.get_response(state.chat_sessions[chat_index][-1]["content"])
 
-        state.chat_sessions[chat_index].append({"role": "assistant", "content": response})
+            if isinstance(raw_response, dict):  # MetaAI format
+                main_text = raw_response.get("message", "")
+                sources = raw_response.get("sources", [])
+                media = raw_response.get("media", [])
+
+                st.write_stream(stream_response(main_text))
+
+                if sources:
+                    st.markdown("#### 🔗 Sources")
+                    for src in sources:
+                        title = src.get("title", "Source")
+                        url = src.get("uri") or src.get("url") or src.get("link")
+
+                        if url and url != "unavailable":
+                            st.markdown(f"- [{title}]({url})", unsafe_allow_html=True)
+                        else:
+                             st.markdown(f"- {title} _(link unavailable)_")
+                if media:
+                    st.markdown("#### 🖼️ Media")
+                    for item in media:
+                        url = item.get("url")
+                        mtype = item.get("type", "unknown")
+                        if mtype == "image" and url:
+                            st.image(url, caption=item.get("prompt", ""), use_column_width=True)
+                        elif mtype == "video" and url:
+                            st.video(url)
+
+                state.chat_sessions[chat_index].append({"role": "assistant", "content": main_text})
+                st.session_state.generated_response = main_text
+
+            else:  # Simple string response
+                st.write_stream(stream_response(raw_response))
+                state.chat_sessions[chat_index].append({"role": "assistant", "content": raw_response})
+                st.session_state.generated_response = raw_response
+
         save_user_data_from_session(state.username)
-
-        st.session_state.generated_response = response
         st.session_state.response_handled = True
         st.session_state.audio_played = False
         st.rerun()
@@ -469,6 +500,7 @@ def show_chat_page(state):
                 st.session_state.generated_response = None
                 st.session_state.audio_played = False
                 st.rerun()
+
 
 
 # --- Settings and Quiz Page UI ---
