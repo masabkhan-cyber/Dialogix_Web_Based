@@ -479,7 +479,7 @@ def show_settings_page(state):
 
     with st.container(border=True):
         st.header("Whisper Model")
-        whisper_models = ["tiny", "base", "small", "medium", "large", "large-v2"]
+        whisper_models = ["tiny", "base", "small", "medium"]
         # MODIFIED: Use st.session_state.user_config for whisper model
         current_whisper_model = state.user_config.get("whisper_model", "tiny")
         if current_whisper_model not in whisper_models:
@@ -518,7 +518,7 @@ def show_quiz_page(state):
     st.markdown("Create a quiz from a topic or a PDF document.")
 
     if 'page' in st.session_state and st.session_state.page != 'quiz':
-        keys_to_clear = ['quiz_data', 'user_answers', 'show_score']
+        keys_to_clear = ['quiz_data', 'user_answers', 'show_score', 'shuffled_options']
         for key in keys_to_clear:
             if key in st.session_state:
                 del st.session_state[key]
@@ -553,7 +553,6 @@ def show_quiz_page(state):
                     if pdf_path:
                         source_input_valid = True
 
-            # MODIFIED: Pass st.session_state.user_config to QuizGenerator
             if st.button("✨ Generate Quiz", use_container_width=True, type="primary", disabled=not source_input_valid):
                 generator = QuizGenerator(st.session_state.user_config)
                 with st.spinner("Generating your quiz... This may take a moment."):
@@ -574,29 +573,48 @@ def show_quiz_page(state):
                     if isinstance(quiz_data, list) and all('question' in q and 'options' in q and 'answer' in q for q in quiz_data):
                         st.session_state.quiz_data = quiz_data
                         st.session_state.user_answers = [None] * len(quiz_data)
+                        st.session_state.shuffled_options = {}  # Reset shuffles
                         st.session_state.show_score = False
                         st.rerun()
                     else:
-                        st.error("The AI returned an invalid quiz format. Please ensure it contains questions, options, and answers.", icon="🚨")
+                        st.error("Invalid quiz format. Please ensure it contains questions, options, and answers.", icon="🚨")
                         st.code(response)
                 except (json.JSONDecodeError, TypeError) as e:
-                    st.error(f"Failed to parse the quiz from the AI's response: {e}. Check the AI's output format.", icon="🚨")
+                    st.error(f"Failed to parse the quiz from the AI's response: {e}", icon="🚨")
                     st.code(response)
 
     if st.session_state.get('quiz_data') and not st.session_state.get('show_score'):
         with st.container(border=True):
             st.subheader("2. Take the Quiz")
+
+            if 'shuffled_options' not in st.session_state:
+                st.session_state.shuffled_options = {}
+
             with st.form("quiz_form"):
                 user_answers = []
                 for i, q in enumerate(st.session_state.quiz_data):
                     st.markdown(f"**Question {i+1}: {q['question']}**")
-                    options = q.get('options', [])
-                    if q['answer'] not in options:
-                        options.append(q['answer'])
-                    import random
-                    random.shuffle(options)
-                    user_choice = st.radio("Options:", options, key=f"q_{i}", label_visibility="collapsed")
-                    user_answers.append(user_choice)
+
+                    if i not in st.session_state.shuffled_options:
+                        opts = q['options']
+                        if q['answer'] not in opts:
+                            opts.append(q['answer'])
+                        shuffled = opts[:]
+                        import random
+                        random.shuffle(shuffled)
+                        st.session_state.shuffled_options[i] = shuffled
+
+                    # Add A/B/C/D labels
+                    labeled_options = [f"{chr(65 + j)}. {opt}" for j, opt in enumerate(st.session_state.shuffled_options[i])]
+
+                    selected_label = st.radio(
+                        f"Options for Q{i+1}", 
+                        labeled_options, 
+                        key=f"q_{i}"
+                    )
+                    # Strip "A. ", "B. " prefix
+                    selected_option = selected_label[3:]
+                    user_answers.append(selected_option)
 
                 st.markdown("---")
                 if st.form_submit_button("Submit Answers", use_container_width=True, type="primary"):
@@ -609,36 +627,49 @@ def show_quiz_page(state):
             st.subheader("3. Your Results")
             quiz_data = st.session_state.quiz_data
             user_answers = st.session_state.user_answers
+            shuffled_options = st.session_state.shuffled_options
+
             score = sum(1 for i, u_ans in enumerate(user_answers) if u_ans == quiz_data[i]['answer'])
             st.metric(label="Your Score", value=f"{score}/{len(quiz_data)}", delta=f"{score/len(quiz_data)*100:.1f}%")
-            with st.expander("📝 Review Your Answers", expanded=False):
+
+            with st.expander("📝 Review Your Answers", expanded=True):
                 for i, q in enumerate(quiz_data):
-                    user_ans = user_answers[i]
-                    correct_ans = q['answer']
-                    if user_ans == correct_ans:
-                        st.success(f"**Q{i+1}: Correct!** {q['question']}", icon="✅")
+                    st.markdown(f"**Q{i+1}: {q['question']}**")
+                    correct_answer = q['answer']
+                    user_answer = user_answers[i]
+
+                    # Get labels
+                    options = shuffled_options[i]
+                    labeled_options = [f"{chr(65 + j)}. {opt}" for j, opt in enumerate(options)]
+                    option_map = {opt: label for label, opt in zip(labeled_options, options)}
+
+                    user_label = option_map.get(user_answer, "Not selected")
+                    correct_label = option_map.get(correct_answer, "Unknown")
+
+                    if user_answer == correct_answer:
+                        st.success(f"✅ Correct!")
                     else:
-                        st.error(f"**Q{i+1}: Incorrect!** {q['question']}", icon="❌")
-                        st.info(f"Your answer: `{user_ans}` | Correct answer: `{correct_ans}`")
-            st.markdown("---")
+                        st.error(f"❌ Incorrect!")
+
+                    st.markdown(f"**Your Answer:** `{user_label} {user_answer}`")
+                    st.markdown(f"**Correct Answer:** `{correct_label} {correct_answer}`")
+                    st.markdown("---")
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("↻ Retry Quiz", use_container_width=True):
-                    keys_to_clear = ['user_answers', 'show_score']
-                    for key in keys_to_clear:
-                        if key in st.session_state:
-                            del st.session_state[key]
+                    for key in ['user_answers', 'show_score', 'shuffled_options']:
+                        st.session_state.pop(key, None)
                     st.rerun()
             with col2:
                 if st.button("🎉 Create New Quiz", use_container_width=True, type="primary"):
-                    keys_to_clear = ['quiz_data', 'user_answers', 'show_score']
-                    for key in keys_to_clear:
-                        if key in st.session_state:
-                            del st.session_state[key]
+                    for key in ['quiz_data', 'user_answers', 'show_score', 'shuffled_options']:
+                        st.session_state.pop(key, None)
                     st.rerun()
             with col3:
-                pdf_data = create_quiz_pdf(st.session_state.quiz_data)
+                pdf_data = create_quiz_pdf(quiz_data)
                 st.download_button(label="📄 Download PDF", data=pdf_data, file_name="quiz_with_answers.pdf", mime="application/pdf", use_container_width=True)
+
 
 def welcome_message():
     """Displays a welcome message in the main chat area."""
