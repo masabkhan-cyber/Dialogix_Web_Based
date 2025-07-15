@@ -181,7 +181,6 @@ def sidebar_session_selector():
             save_user_data_from_session(st.session_state.username)
             st.toast(f"Chat renamed to '{new_name}'", icon="✏️")
         st.session_state.editing_chat_index = None
-        st.rerun()
 
     def adjust_current_chat_after_action(acted_on_index):
         if st.session_state.current_chat == acted_on_index:
